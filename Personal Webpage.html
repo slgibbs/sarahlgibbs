@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <!-- ====== BASIC METADATA ====== -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sarah L. Gibbs | Personal Website</title>
+
+    <!-- ====== BASIC STYLING (CSS) ====== -->
+    <style>
+        /* Overall page styling */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        /* Header section */
+        header {
+            background-color: #003366;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        /* Navigation tabs */
+        nav {
+            display: flex;
+            justify-content: center;
+            background-color: #ddd;
+        }
+
+        nav button {
+            background: none;
+            border: none;
+            padding: 14px 20px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        nav button:hover {
+            background-color: #bbb;
+        }
+
+        nav button.active {
+            background-color: #003366;
+            color: white;
+        }
+
+        /* Content sections */
+        .tab-content {
+            display: none; /* Hidden by default */
+            padding: 30px;
+            max-width: 900px;
+            margin: auto;
+            background-color: white;
+        }
+
+        .tab-content img {
+            max-width: 200px;
+            border-radius: 8px;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 15px;
+            background-color: #003366;
+            color: white;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+
+<body>
+
+<!-- ====== PAGE HEADER ====== -->
+<header>
+    <h1>Your Name</h1>
+    <p>Short professional tagline (e.g., Marine Scientist | Data Analyst)</p>
+</header>
+
+<!-- ====== NAVIGATION TABS ====== -->
+<nav>
+    <button class="tablink active" onclick="openTab(event, 'Home')">Home</button>
+    <button class="tablink" onclick="openTab(event, 'About')">About</button>
+    <button class="tablink" onclick="openTab(event, 'Projects')">Projects</button>
+    <button class="tablink" onclick="openTab(event, 'Publications')">Publications</button>
+    <button class="tablink" onclick="openTab(event, 'Contact')">Contact</button>
+</nav>
+
+<!-- ====== HOME TAB ====== -->
+<div id="Home" class="tab-content" style="display: block;">
+    <h2>Welcome</h2>
+    <p>
+        Welcome to my personal website. This site highlights my work, research,
+        and interests.
+    </p>
+
+    <!-- Example image -->
+    <img src="images/profile.jpg" alt="Profile photo">
+
+    <p>
+        You can find my CV 
+        <a href="https://github.com/yourusername/yourrepo/raw/main/CV.pdf" target="_blank">
+            here
+        </a>.
+    </p>
+</div>
+
+<!-- ====== ABOUT TAB ====== -->
+<div id="About" class="tab-content">
+    <h2>About Me</h2>
+    <p>
+        Brief biography. Describe your background, interests, and expertise.
+    </p>
+
+    <ul>
+        <li>Research interest 1</li>
+        <li>Research interest 2</li>
+        <li>Research interest 3</li>
+    </ul>
+</div>
+
+<!-- ====== PROJECTS TAB ====== -->
+<div id="Projects" class="tab-content">
+    <h2>Projects</h2>
+
+    <h3>Project Title</h3>
+    <p>
+        Short description of the project.
+        <a href="https://github.com/yourusername/project-repo" target="_blank">
+            View on GitHub
+        </a>
+    </p>
+
+    <!-- Example project image -->
+    <img src="images/project1.png" alt="Project image">
+</div>
+
+<!-- ====== PUBLICATIONS TAB ====== -->
+<div id="Publications" class="tab-content">
+    <h2>Publications</h2>
+
+    <ul>
+        <li>
+            Author(s). Year. <i>Title</i>. Journal.
+            <a href="https://doi.org/xxxxx" target="_blank">DOI</a>
+        </li>
+        <li>
+            Author(s). Year. <i>Title</i>. Journal.
+        </li>
+    </ul>
+</div>
+
+<!-- ====== CONTACT TAB ====== -->
+<div id="Contact" class="tab-content">
+    <h2>Contact</h2>
+
+    <p>Email: <a href="mailto:youremail@example.com">youremail@example.com</a></p>
+
+    <p>
+        <a href="https://github.com/yourusername" target="_blank">GitHub</a> |
+        <a href="https://www.linkedin.com/in/yourprofile" target="_blank">LinkedIn</a>
+    </p>
+</div>
+
+<!-- ====== FOOTER ====== -->
+<footer>
+    © 2026 Sarah L. Gibbs
+</footer>
+
+<!-- ====== JAVASCRIPT FOR TAB FUNCTIONALITY ====== -->
+<script>
+    function openTab(evt, tabName) {
+        // Hide all tab content
+        let content = document.getElementsByClassName("tab-content");
+        for (let i = 0; i < content.length; i++) {
+            content[i].style.display = "none";
+        }
+
+        // Remove "active" class from all buttons
+        let tabs = document.getElementsByClassName("tablink");
+        for (let i = 0; i < tabs.length; i++) {
+            tabs[i].classList.remove("active");
+        }
+
+        // Show selected tab and mark button as active
+        document.getElementById(tabName).style.display = "block";
+        evt.currentTarget.classList.add("active");
+    }
+</script>
+
+</body>
+</html>
