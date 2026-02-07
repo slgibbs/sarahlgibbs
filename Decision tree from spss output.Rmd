@@ -1,0 +1,414 @@
+---
+title: "Decision tree from SPSS output"
+author: "Sarah Gibbs"
+date: "July 15, 2025"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+# This document is intended for improving the look of a classification tree that has already been rendered in SPSS. You can use the default display settings that SPSS provides and simply export it as a PMML file (double click on the tree to open the editor, then click File > Export PMML).
+# While the function is handy and easy to use, depending on your desire (and the size and depth of your tree) you may have to do some additional image processing after rendering. I recommend Inkscape (open-source). For example, due to package limitations (as well as the limitations of my own coding abilities) certain dynamic labels cannot be rendered in the same function as the static lines that connect branches (bottom half of code).
+# Load packages
+```{r}
+library(ggplot2)
+library(XML)
+library(patchwork)
+library(data.tree)
+library(RColorBrewer)
+library(grid)
+library(cowplot)
+library(stringr)
+```
+
+# Load data
+```{r}
+pmml <- xmlParse("C:\\Users\\sgibb\\OneDrive\\Documents\\Scyphers Lab\\Reef Fish Extension\\Survey Analysis\\DecisionTree.xml") # change this to your own file directory
+ns <- c(pmml = "http://www.dmg.org/PMML-4_3")
+```
+
+# Get variable names and labels
+```{r}
+# Extract labels from DataDictionary (Variable names and class labels)
+extract_labels <- function(pmml, ns) {
+  data_fields <- getNodeSet(pmml, "//pmml:DataField", namespaces = ns)
+  
+  # Get predicted field name
+  predicted_field_node <- getNodeSet(pmml, "//pmml:MiningField[@usageType='predicted']", namespaces = ns)[[1]]
+  predicted_field_name <- xmlGetAttr(predicted_field_node, "name")
+
+  # Create result lists
+  class_labels <- list()
+  variable_labels <- list()
+  value_labels <- list()
+
+  # Iterate through each variable in dictionary
+  for (field in data_fields) {
+    field_name <- xmlGetAttr(field, "name")
+    display_name <- xmlGetAttr(field, "displayName", default = field_name)
+
+    # Store variable name
+    variable_labels[[field_name]] <- display_name
+
+    # Store value labels (if they exist)
+    value_nodes <- getNodeSet(field, "./pmml:Value", namespaces = ns)
+    if (length(value_nodes) > 0) {
+      value_map <- sapply(value_nodes, function(x) {
+        val <- xmlGetAttr(x, "value")
+        disp <- xmlGetAttr(x, "displayValue", default = val)
+        disp
+      })
+      names(value_map) <- sapply(value_nodes, function(x) xmlGetAttr(x, "value"))
+      value_labels[[field_name]] <- value_map
+      
+      # Save class labels if variable is predicted
+      if (field_name == predicted_field_name) {
+        class_labels <- value_map
+      }
+    }
+  }
+
+  return(list(
+    class_labels = class_labels,
+    variable_labels = variable_labels,
+    value_labels = value_labels
+  ))
+}
+
+labels <- extract_labels(pmml, ns)
+class_labels <- labels$class_labels
+variable_labels <- labels$variable_labels
+value_labels <- labels$value_labels
+```
+
+# Parse the decision tree from PMML file
+```{r}
+# Get predicted variable name
+get_title <- function(pmml, ns) {
+  # 1. Find the predicted field name
+  predicted_field_node <- getNodeSet(pmml, "//pmml:MiningField[@usageType='predicted']", namespaces = ns)[[1]]
+  predicted_field_name <- xmlGetAttr(predicted_field_node, "name")
+
+  # 2. Look it up in the DataDictionary
+  xpath <- paste0("//pmml:DataField[@name='", predicted_field_name, "']")
+  data_field_node <- getNodeSet(pmml, xpath, namespaces = ns)[[1]]
+  display_name <- xmlGetAttr(data_field_node, "displayName")
+
+  return(display_name)
+}
+
+# Categorical variable splits are nested within the model, this makes sure they are being referenced
+get_first_split <- function(xml_node, ns) {
+  preds <- getNodeSet(xml_node, ".//pmml:SimplePredicate", namespaces = ns)
+  if (length(preds) > 0) {
+    pred <- preds[[1]]
+    field <- xmlGetAttr(pred, "field")
+    op <- xmlGetAttr(pred, "operator")
+    val <- xmlGetAttr(pred, "value")
+    return(paste(field, op, val))
+  } else {
+    return(NA)
+  }
+}
+
+parse_node <- function(xml_node, ns, variable_labels, value_labels, class_labels) {
+  node_id <- xmlGetAttr(xml_node, "id")
+  score <- as.character(xmlGetAttr(xml_node, "score"))
+  count <- as.numeric(xmlGetAttr(xml_node, "recordCount"))
+  
+  split_raw <- get_first_split(xml_node, ns)
+  if (!is.na(split_raw)) {
+    parts <- strsplit(split_raw, " ")[[1]]
+    var <- parts[1]
+    op <- parts[2]
+    val <- parts[3]
+
+    var_display <- variable_labels[[var]]
+    val_display <- value_labels[[var]][[val]]
+    if (is.null(val_display))
+      val_display <- val # If variable is continuous, raw numeric string will be added
+
+    op_symbol <- switch(op,
+                      "lessOrEqual" = "≤",
+                      "greaterThan" = ">",
+                      "equal" = "=",
+                      op) 
+
+    split <- list(
+      variable = var_display, # Question text
+      value = paste(op_symbol, val_display) # Split response
+    )
+  } else {
+    split <- NULL
+  }
+
+  # Get score distribution
+  dist_nodes <- getNodeSet(xml_node, "./pmml:ScoreDistribution", namespaces = ns)
+  classes <- sapply(dist_nodes, function(x) xmlGetAttr(x, "value"))
+  freqs <- sapply(dist_nodes, function(x) as.numeric(xmlGetAttr(x, "recordCount")))
+  probs <- round((freqs / sum(freqs)) * 100, 1)
+
+  # Parse children
+  children_nodes <- getNodeSet(xml_node, "./pmml:Node", namespaces = ns)
+  children <- lapply(children_nodes, function(x) parse_node(x, ns, variable_labels, value_labels, class_labels))
+
+  list(
+    node_id = node_id,
+    parent_id = NULL,
+    score = score,
+    count = count,
+    label = paste0(
+      #class_labels[score], # If you want to add predicted categories for each donut
+      "\nN=", count),
+    split = split,
+    probs = data.frame(Class = classes, Freq = probs),
+    children = children
+  )
+}
+
+# Get root node
+tree_root <- getNodeSet(pmml, "//pmml:TreeModel/pmml:Node", namespaces = ns)[[1]]
+tree_data <- parse_node(tree_root, ns, variable_labels, value_labels, class_labels)
+
+# Get title 
+tree_title <- get_title(pmml, ns)
+```
+
+# Donut plot for each node
+```{r}
+donut_plot <- function(probs_df, class_labels, palette, count, show_legend = F) {
+
+  probs_df$ClassLabel <- factor(class_labels[as.character(probs_df$Class)], levels = unname(class_labels))
+  
+  p <- ggplot(probs_df, aes(x = 2, y = Freq, fill = ClassLabel)) +
+    geom_bar(stat = "identity", color = "white", width = 1) +
+    coord_polar("y", start = 0) +
+    geom_text(aes(label = paste0(Freq, "%")),
+              position = position_stack(vjust = 0.5)) +
+    xlim(0.5, 2.5) +
+    theme_void() +
+    annotate(geom = 'text', x = 0.5, y = 0, label = paste0("N = ", count)) + # add sample size to center
+    scale_fill_manual(name = "Satisfaction Level", values = palette, drop = F, 
+                      guide = guide_legend(reverse = T)) +
+    theme(legend.position = if (show_legend) "right" else "none",
+      plot.title = element_text(size = 10)
+    )
+  
+  cowplot::ggdraw(p)
+}
+```
+
+# Plot all nodes in tree layout
+```{r}
+render_tree <- function(node, class_labels, palette, title = NULL, depth = 0) {
+  
+  is_root <- depth == 0
+
+  donut <- donut_plot(node$probs, class_labels, palette, node$count, show_legend = is_root)
+
+  # If no children, return donut (no split at leaves)
+  if (length(node$children) == 0) {
+    return(donut)
+  }
+
+  # 1. Render all child donuts with their *split value labels* ABOVE
+  child_with_value_labels <- lapply(node$children, function(child) {
+    # Get label like "< Very Satisfied"
+    value_label <- if (!is.null(child$split$value)) child$split$value else ""
+    value_label_plot <- cowplot::ggdraw() + cowplot::draw_label(
+      value_label, fontface = "italic", size = 9, hjust = 0.5
+    )
+    donut_plot <- render_tree(child, class_labels, palette, title = NULL, depth = depth + 1)
+    cowplot::plot_grid(value_label_plot, donut_plot, ncol = 1, rel_heights = c(0.12, 1))
+  })
+
+  children_row <- cowplot::plot_grid(plotlist = child_with_value_labels, nrow = 1, align = "h")
+
+  # 2. Add split variable label ABOVE the entire row of children (but only if not root)
+  if (!is_root && !is.null(node$children[[1]]$split$variable)) {
+    split_variable_label <- cowplot::ggdraw() + cowplot::draw_label(
+      str_wrap(node$children[[1]]$split$variable, width = 45),
+      fontface = "bold",
+      size = 11,
+      hjust = 0.5
+    )
+    children_row <- cowplot::plot_grid(split_variable_label, children_row, ncol = 1, rel_heights = c(0.15, 1))
+  }
+
+  # 3. Add title above root node only
+  if (is_root) {
+  # Title above everything
+  title_label <- cowplot::ggdraw() + cowplot::draw_label(title, fontface = "bold", size = 13, hjust = 0.5)
+
+  # Root split variable label (from first child)
+  if (!is.null(node$children[[1]]$split$variable)) {
+    root_split_label <- cowplot::ggdraw() + cowplot::draw_label(
+      str_wrap(node$children[[1]]$split$variable, width = 45),
+      fontface = "bold", size = 11, hjust = 0.5
+    )
+    final_stack <- cowplot::plot_grid(
+      title_label, donut, root_split_label, children_row,
+      ncol = 1, rel_heights = c(0.12, 1, 0.15, 1)
+    )
+  } else {
+    final_stack <- cowplot::plot_grid(title_label, donut, children_row, ncol = 1, rel_heights = c(0.12, 1, 1))
+  }
+
+} else {
+  # Regular subtree layout
+  final_stack <- cowplot::plot_grid(donut, children_row, ncol = 1, rel_heights = c(1, 1))
+}
+
+  return(final_stack)
+}
+```
+
+# Display tree
+```{r}
+# Specify palette
+palette <- setNames(brewer.pal(5, "RdYlBu"), unname(class_labels)) # links colors to labels, so if a class is missing color order is still maintained
+
+tree_plot <- render_tree(tree_data, class_labels, palette, tree_title)
+tree_plot
+```
+
+# Export tree
+```{r}
+# If you are doing any post processing with an image software (e.g., Inkscape), .svg files should be used
+ggsave("tree_plot.svg", width = 18, height = 12, units = "in")
+```
+
+# Below, the tree will render with connectors for each branching node, but you have less flexibility with generating labels.
+
+# Build layout with coordinates
+```{r}
+flatten_tree_with_coords <- function(node, x = 0, y = 0, parent_id = NULL, level = 0, spacing = 1) {
+  node_info <- list(
+    id = node$node_id,
+    parent = parent_id,
+    x = x,
+    y = -level,
+    node = node
+  )
+
+  if (length(node$children) == 0) {
+    return(list(node_info))
+  }
+
+  # Calculate child positions
+  n <- length(node$children)
+  width <- spacing * (n - 1)
+  child_positions <- seq(x - width / 2, x + width / 2, length.out = n)
+
+  children <- unlist(
+    mapply(function(child, cx) {
+    flatten_tree_with_coords(child, x = cx, y = y - 1, parent_id = node$node_id, level = level + 1, spacing = spacing / 1.5)
+  }, node$children, child_positions, SIMPLIFY = FALSE),
+  recursive = FALSE)
+
+  return(c(list(node_info), children))
+}
+
+```
+
+# Plot all nodes and connectors
+```{r}
+render_tree_with_connectors <- function(flat_tree, class_labels, palette, title = NULL) {
+
+# Make a named list for easy lookup by node ID
+node_lookup <- setNames(flat_tree, sapply(flat_tree, function(e) e$id))
+
+  # Build node plots
+  plots <- lapply(flat_tree, function(entry) {
+    node <- entry$node
+    depth <- abs(entry$y)
+    is_root <- is.null(entry$parent)
+    show_legend <- is_root
+    label <- paste0("N = ", node$count)
+
+    p <- donut_plot(node$probs, label, class_labels, palette, show_legend = show_legend)
+
+    # Add split value above, if present and not root
+    if (!is_root && !is.null(node$split$value)) {
+      label_layer <- ggplot() +
+        geom_label(aes(x = 0.5, y = 0.5, label = node$split$value),
+                   fill = "white", color = "black", size = 3, label.size = NA,
+                   fontface = "italic") +
+        theme_void() +
+        xlim(0, 1) + ylim(0, 1)
+        #cowplot::ggdraw() + cowplot::draw_label(
+        #node$split$value,
+        #fontface = "italic", size = 9, hjust = 0.5,
+        #fill = "white", label.size = NA  # white background
+      #)
+      p <- cowplot::plot_grid(label_layer, p, ncol = 1, rel_heights = c(0.15, 1))
+    }
+
+    return(p)
+  })
+
+  # Compute layout extents
+  min_x <- min(sapply(flat_tree, function(n) n$x))
+  max_x <- max(sapply(flat_tree, function(n) n$x))
+  min_y <- min(sapply(flat_tree, function(n) n$y))
+  max_y <- max(sapply(flat_tree, function(n) n$y))
+
+  # Create empty base canvas
+  base <- ggplot() + xlim(min_x - 1, max_x + 1) + ylim(min_y - 1, max_y + 1) + theme_void()
+
+  # Add connector lines
+  connectors <- do.call(rbind, lapply(flat_tree, function(entry) {
+  if (!is.null(entry$parent)) {
+    parent <- node_lookup[[entry$parent]]
+    if (!is.null(parent)) {
+      data.frame(
+        x = parent$x,
+        y = parent$y - 0.1,
+        xend = entry$x,
+        yend = entry$y + 0.1
+      )
+    }
+  }
+}))
+  
+  base <- base + geom_segment(
+  data = connectors,
+  aes(x = x, y = y, xend = xend, yend = yend),
+  linewidth = 0.5,
+  color = "gray30",
+  inherit.aes = FALSE
+)
+
+  # Add all donut plots as annotation_custom grobs
+  for (i in seq_along(flat_tree)) {
+    entry <- flat_tree[[i]]
+    p <- plots[[i]]
+    g <- ggplotGrob(p)
+    base <- base + annotation_custom(g, xmin = entry$x - 0.5, xmax = entry$x + 0.5,
+                                     ymin = entry$y - 0.5, ymax = entry$y + 0.5)
+  }
+
+  # Add title (once)
+  if (!is.null(title)) {
+    title_row <- cowplot::ggdraw() + cowplot::draw_label(title, fontface = "bold", size = 14, hjust = 0.5)
+    return(cowplot::plot_grid(title_row, base, ncol = 1, rel_heights = c(0.12, 1)))
+  }
+
+  return(base)
+}
+```
+
+# Display tree
+```{r}
+# Specify palette
+palette <- setNames(brewer.pal(5, "RdYlBu"), unname(class_labels)) # links colors to labels, so if a class is missing color order is still maintained
+
+flat <- flatten_tree_with_coords(tree_data)
+tree_plot <- render_tree_with_connectors(flat, class_labels, palette, title = tree_title)
+tree_plot
+```
+
+# Export tree
+```{r}
+# If you are doing any post processing with an image software (e.g., Inkscape), svg files should be used
+ggsave("tree_plot.svg", width = 18, height = 12, units = "in")
+```
